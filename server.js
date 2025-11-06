@@ -5,6 +5,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 app.use(express.json());
@@ -86,6 +87,54 @@ app.post("/api/giveaway", async (req, res) => {
   }
 });
 
+// === 💳 API: Create Payment Intent ===
+app.post("/api/create-payment-intent", async (req, res) => {
+  try {
+    const { email, amount, cardName } = req.body;
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // Stripe uses cents
+      currency: 'usd',
+      receipt_email: email,
+      metadata: {
+        cardName: cardName
+      }
+    });
+
+    res.json({ clientSecret: paymentIntent.client_secret });
+  } catch (err) {
+    console.error('❌ Payment Intent Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// === ✅ API: Confirm Payment ===
+app.post("/api/confirm-payment", async (req, res) => {
+  try {
+    const { paymentIntentId, email, amount, cardName } = req.body;
+
+    // Confirm the payment
+    const paymentIntent = await stripe.paymentIntents.confirm(paymentIntentId);
+
+    if (paymentIntent.status === 'succeeded') {
+      res.json({ 
+        success: true, 
+        order: {
+          id: paymentIntent.id,
+          email,
+          amount,
+          cardName
+        }
+      });
+    } else {
+      res.json({ success: false, error: 'Payment failed' });
+    }
+  } catch (err) {
+    console.error('❌ Payment Confirmation Error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // === 🧩 Base Route ===
 app.get("/", (req, res) => {
   res.send("🐟 FloundeRx Backend is Live & Operational.");
@@ -99,6 +148,7 @@ app.listen(PORT, () => {
 🔥  FLOUNDERX BACKEND ONLINE
 🌐  Listening on port: ${PORT}
 🎁  Giveaway API: /api/giveaway
+💳  Payment APIs: /api/create-payment-intent, /api/confirm-payment
 🐠  Keep playing, keep floundering.
 ==========================================
   `);
